@@ -11,6 +11,14 @@ pip install -r requirements.txt
 python -m pipeline
 ```
 
+The last line of output is the headline result, the accuracy on the held-out test set:
+
+```
+Test accuracy: 0.9888
+```
+
+It is also the first line of `artifacts/report.md`.
+
 The dataset is public, so it is downloaded automatically from Kaggle on the first run
 (no API key needed) into `data/raw/`. If the download fails, download the CSV manually
 from Kaggle and place it at `data/raw/Student_Depression_Dataset.csv`.

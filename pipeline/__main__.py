@@ -49,7 +49,7 @@ def main(argv=None) -> dict:
     metrics = evaluate(model, X_test, y_test)
     importance = feature_importance(model, X_test, y_test)
     print(f"\nBest model: {best_name}")
-    for key in ["accuracy", "precision", "recall", "f1", "roc_auc"]:
+    for key in ["precision", "recall", "f1", "roc_auc"]:
         print(f"  test {key}: {metrics[key]:.4f}")
 
     # 5. Save artifacts
@@ -67,6 +67,9 @@ def main(argv=None) -> dict:
         format_report(comparison, best_name, metrics, importance, exclude, len(X_train), len(X_test))
     )
     print(f"\nSaved model and reports to {out_dir}")
+
+    # Headline result: a single line with the hold-out test accuracy.
+    print(f"\nTest accuracy: {metrics['accuracy']:.4f}")
     return summary
 
 

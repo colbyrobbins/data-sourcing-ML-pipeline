@@ -59,6 +59,8 @@ def format_report(
     lines = [
         "# Student Depression Detection - Pipeline Report",
         "",
+        f"**Test accuracy: {metrics['accuracy']:.4f}**",
+        "",
         f"Train rows: {n_train} | Test rows: {n_test}",
         f"Excluded features: {', '.join(exclude) if exclude else 'none'}",
         "",
