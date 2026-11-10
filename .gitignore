@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project data (raw files are fetched reproducibly via data/manifest.json)
+data/raw/
+data/interim/
+data/processed/
+data/.tmp/

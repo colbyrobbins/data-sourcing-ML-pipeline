@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-sourcing-ml-pipeline"
+version = "0.1.0"
+description = "ML pipeline starting with reproducible Student Depression Detection dataset ingestion."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "kagglehub>=1.0.3,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+]
+
+[project.scripts]
+fetch-dataset = "ml_pipeline.data.ingest:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
