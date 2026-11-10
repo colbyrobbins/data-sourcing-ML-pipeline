@@ -19,19 +19,21 @@ Test accuracy: 0.9888
 
 It is also the first line of `artifacts/report.md`.
 
-The dataset is public, so it is downloaded automatically from Kaggle on the first run
-(no API key needed) into `data/raw/`. If the download fails, download the CSV manually
-from Kaggle and place it at `data/raw/Student_Depression_Dataset.csv`.
+The dataset is public, so version 1 is downloaded automatically from Kaggle on the first run
+(no API key needed) into `data/raw/` and verified against its pinned SHA-256 checksum. If the
+download fails, download the CSV manually from Kaggle and place it at
+`data/raw/Student_Depression_Dataset.csv`.
 
 Options:
 
 ```bash
+python -m pipeline.data                         # download & verify the dataset only
 python -m pipeline --exclude Health_condition   # drop one or more features
 python -m pipeline --force-download             # re-download the data
 python -m pipeline --out artifacts/my_run       # choose output folder
 ```
 
-Run the tests (they use a small synthetic dataset, so no download is needed):
+Run the tests (they use synthetic data/mocks, so no download is needed):
 
 ```bash
 python -m pytest
@@ -41,7 +43,7 @@ python -m pytest
 
 | Step | Module | What it does |
 |---|---|---|
-| 1. Source | `pipeline/data.py` | Downloads the Kaggle zip, extracts the CSV, loads it (handles the file's UTF-8 BOM), trims strings, drops duplicates, validates columns |
+| 1. Source | `pipeline/data.py` | Downloads the pinned Kaggle zip (`v1`), verifies its SHA-256 checksum, extracts the CSV, loads it (handles the file's UTF-8 BOM), trims strings, drops duplicates, validates columns |
 | 2. Split | `pipeline/__main__.py` | Stratified 80/20 train/test split |
 | 3. Preprocess | `pipeline/features.py` | Numeric: median impute + standard scale. Ordered categories (`Family_background`, `Health_condition`): ordinal encode. Other categories: one-hot encode |
 | 4. Select | `pipeline/model.py` | 5-fold stratified CV on the training set for Logistic Regression, Random Forest and Gradient Boosting (class-weighted where supported); picks the best by ROC-AUC |
@@ -54,8 +56,8 @@ Column groups, paths and constants live in `pipeline/config.py`.
 
 | Run | Best model | Test ROC-AUC | Test F1 | Test accuracy |
 |---|---|---|---|---|
-| All features | Random Forest | 0.999 | 0.979 | 0.989 |
-| Without `Health_condition` | Random Forest | 0.726 | 0.492 | 0.727 |
+| All features | Random Forest | 0.998 | 0.979 | 0.989 |
+| Without `Health_condition` | Random Forest | 0.725 | 0.512 | 0.697 |
 
 ### Caveat: `Health_condition` nearly determines the label
 
@@ -64,15 +66,15 @@ every student with `Good` is not (`Abnormal` is 55% depressed, `Normal` 5%). The
 leans almost entirely on that one column, which is why the full-feature scores are near
 perfect. If health condition is assessed together with (or after) the depression
 diagnosis, it leaks the answer, and the honest estimate is the run without it
-(ROC-AUC ~0.73). Without it, `Relationship_status`, `friend_circle` and `CGPA` are the
-most useful signals.
+(ROC-AUC ~0.72, test accuracy ~0.70). Without it, `Relationship_status`, `friend_circle` and
+`CGPA` are the most useful signals.
 
 ## Project layout
 
 ```
 pipeline/
   config.py      paths, column groups, constants
-  data.py        download + load + clean
+  data.py        pinned download + SHA-256 verify + load + clean
   features.py    preprocessing (ColumnTransformer)
   model.py       candidate models, CV comparison, training
   evaluate.py    test metrics, feature importance, report

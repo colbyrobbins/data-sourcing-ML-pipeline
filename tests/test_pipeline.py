@@ -1,11 +1,16 @@
 """Smoke tests that run the pipeline pieces on a small synthetic dataset (no download needed)."""
 
+import hashlib
+import io
+import urllib.request
+import zipfile
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from pipeline import config
-from pipeline.data import load_data, split_features_target
+from pipeline.data import download_dataset, load_data, split_features_target
 from pipeline.evaluate import evaluate
 from pipeline.features import build_preprocessor
 from pipeline.model import compare_models, train_model
@@ -64,3 +69,51 @@ def test_end_to_end(sample_csv):
     model = train_model(comparison.loc[0, "model"], X, y)
     metrics = evaluate(model, X, y)
     assert metrics["roc_auc"] > 0.9  # target is a deterministic function of Health_condition
+
+
+
+def _zip_bytes(csv_bytes: bytes) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"Nested/{config.CSV_NAME_IN_ZIP}", csv_bytes)
+    return buf.getvalue()
+
+
+def test_download_dataset_verifies_and_caches(tmp_path, monkeypatch):
+    csv_bytes = b"col\nval\n"
+    archive = _zip_bytes(csv_bytes)
+    calls = 0
+
+    def fake_urlopen(_url, timeout=60):
+        nonlocal calls
+        calls += 1
+        return io.BytesIO(archive)
+
+    monkeypatch.setattr(config, "RAW_CSV_SHA256", hashlib.sha256(csv_bytes).hexdigest())
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    dest = tmp_path / "Student_Depression_Dataset.csv"
+    assert download_dataset(dest) == dest
+    assert dest.read_bytes() == csv_bytes
+    assert calls == 1
+
+    # Matching checksum reuses local file without hitting the network.
+    assert download_dataset(dest) == dest
+    assert calls == 1
+
+    # Corrupted local file triggers re-download and restores verified data.
+    dest.write_bytes(b"corrupt")
+    assert download_dataset(dest) == dest
+    assert dest.read_bytes() == csv_bytes
+    assert calls == 2
+
+
+def test_download_dataset_rejects_checksum_mismatch(tmp_path, monkeypatch):
+    archive = _zip_bytes(b"unexpected-data")
+    monkeypatch.setattr(config, "RAW_CSV_SHA256", "0" * 64)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda _u, timeout=60: io.BytesIO(archive))
+
+    dest = tmp_path / "Student_Depression_Dataset.csv"
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        download_dataset(dest)
+    assert not dest.exists()

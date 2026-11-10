@@ -1,5 +1,6 @@
 """Data sourcing: download the dataset from Kaggle and load it into a DataFrame."""
 
+import hashlib
 import io
 import urllib.request
 import zipfile
@@ -10,25 +11,39 @@ import pandas as pd
 from . import config
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def download_dataset(dest: Path = config.RAW_CSV, force: bool = False) -> Path:
-    """Download the Kaggle dataset zip and extract the CSV to ``dest``.
+    """Download the pinned Kaggle dataset zip, verify its SHA-256 checksum, and save to ``dest``.
 
     The dataset is public, so Kaggle's download endpoint works without an API key.
     If the download fails, download the CSV manually from Kaggle and place it at ``dest``.
     """
     if dest.exists() and not force:
-        return dest
+        if _sha256(dest.read_bytes()) == config.RAW_CSV_SHA256:
+            return dest
+        print(f"Existing {dest} failed SHA-256 verification; re-downloading ...")
 
-    print(f"Downloading {config.KAGGLE_DATASET} ...")
+    print(f"Downloading {config.KAGGLE_DATASET} (v{config.KAGGLE_DATASET_VERSION}) ...")
     with urllib.request.urlopen(config.KAGGLE_DOWNLOAD_URL, timeout=60) as resp:
         payload = resp.read()
 
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
         member = next(n for n in zf.namelist() if n.endswith(config.CSV_NAME_IN_ZIP))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(zf.read(member))
+        csv_bytes = zf.read(member)
 
-    print(f"Saved to {dest}")
+    actual = _sha256(csv_bytes)
+    if actual != config.RAW_CSV_SHA256:
+        raise ValueError(
+            f"Checksum mismatch for {config.CSV_NAME_IN_ZIP}: "
+            f"expected {config.RAW_CSV_SHA256}, got {actual}"
+        )
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(csv_bytes)
+    print(f"Saved and verified {dest}")
     return dest
 
 
@@ -45,7 +60,7 @@ def load_data(path: Path = config.RAW_CSV) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Dataset is missing expected columns: {sorted(missing)}")
 
-    for col in df.select_dtypes(include="object").columns:
+    for col in df.select_dtypes(include=["object", "string"]).columns:
         df[col] = df[col].str.strip()
 
     df = df.drop_duplicates().reset_index(drop=True)
@@ -57,3 +72,7 @@ def split_features_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     y = (df[config.TARGET] == config.POSITIVE_LABEL).astype(int)
     X = df.drop(columns=[config.TARGET])
     return X, y
+
+
+if __name__ == "__main__":
+    download_dataset()
