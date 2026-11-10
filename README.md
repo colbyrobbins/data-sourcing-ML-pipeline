@@ -1,44 +1,84 @@
 # data-sourcing-ML-pipeline
 
-Reproducible ML pipeline starting with the Kaggle [Student Depression Detection Dataset](https://www.kaggle.com/datasets/mkhoirulmustaqim/student-depression-detection-dataset).
+A simple, end-to-end ML pipeline that predicts student depression from the Kaggle
+[Student Depression Detection Dataset](https://www.kaggle.com/datasets/mkhoirulmustaqim/student-depression-detection-dataset)
+(4,464 students from Bangladesh, 12 features, binary `Depression` target, ~27% positive).
 
-## Setup
+## Quick start
 
-Create/activate the virtual environment and install the package in editable mode:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```bash
+pip install -r requirements.txt
+python -m pipeline
 ```
 
-## Reproducible Dataset Ingestion
+The last line of output is the headline result, the accuracy on the held-out test set:
 
-Raw dataset files are gitignored under `data/raw/` and pinned in [`data/manifest.json`](data/manifest.json) by Kaggle dataset version (`versions/1`), file byte size, and SHA-256 digest.
-
-Fetch and verify the dataset into `data/raw/`:
-
-```powershell
-.\.venv\Scripts\python.exe -m ml_pipeline.data.ingest
+```
+Test accuracy: 0.9888
 ```
 
-Or using the installed script entrypoint:
+It is also the first line of `artifacts/report.md`.
 
-```powershell
-.\.venv\Scripts\fetch-dataset.exe
+The dataset is public, so it is downloaded automatically from Kaggle on the first run
+(no API key needed) into `data/raw/`. If the download fails, download the CSV manually
+from Kaggle and place it at `data/raw/Student_Depression_Dataset.csv`.
+
+Options:
+
+```bash
+python -m pipeline --exclude Health_condition   # drop one or more features
+python -m pipeline --force-download             # re-download the data
+python -m pipeline --out artifacts/my_run       # choose output folder
 ```
 
-Useful flags:
-- `--verify-only`: Check local `data/raw/` files against `data/manifest.json` without downloading.
-- `--force`: Re-download from KaggleHub and overwrite local files.
+Run the tests (they use a small synthetic dataset, so no download is needed):
 
-This public dataset downloads without authentication via `kagglehub`. If you later configure private datasets or hit rate limits, set `KAGGLE_USERNAME` / `KAGGLE_KEY` or place `~/.kaggle/kaggle.json`.
-
-### Dataset Contents (`versions/1`)
-
-- `data/raw/Student_Depression_Dataset.csv` (4,464 rows, 13 columns: `Gender`, `Age`, `Family_background`, `Relationship_status`, `Marital_status`, `Living_style`, `Current_semester`, `CGPA`, `friend_circle`, `Health_condition`, `Cost_without_study`, `Home_division`, `Depression`)
-- `data/raw/Student_Depression_Dataset.xlsx`
-
-## Tests
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest
+```bash
+python -m pytest
 ```
+
+## Pipeline steps
+
+| Step | Module | What it does |
+|---|---|---|
+| 1. Source | `pipeline/data.py` | Downloads the Kaggle zip, extracts the CSV, loads it (handles the file's UTF-8 BOM), trims strings, drops duplicates, validates columns |
+| 2. Split | `pipeline/__main__.py` | Stratified 80/20 train/test split |
+| 3. Preprocess | `pipeline/features.py` | Numeric: median impute + standard scale. Ordered categories (`Family_background`, `Health_condition`): ordinal encode. Other categories: one-hot encode |
+| 4. Select | `pipeline/model.py` | 5-fold stratified CV on the training set for Logistic Regression, Random Forest and Gradient Boosting (class-weighted where supported); picks the best by ROC-AUC |
+| 5. Evaluate | `pipeline/evaluate.py` | Trains the best model on the full training set, scores it once on the held-out test set, computes permutation feature importance |
+| 6. Save | `pipeline/__main__.py` | Writes `model.joblib`, `metrics.json`, `model_comparison.csv` and `report.md` to `artifacts/` |
+
+Column groups, paths and constants live in `pipeline/config.py`.
+
+## Results
+
+| Run | Best model | Test ROC-AUC | Test F1 | Test accuracy |
+|---|---|---|---|---|
+| All features | Random Forest | 0.999 | 0.979 | 0.989 |
+| Without `Health_condition` | Random Forest | 0.726 | 0.492 | 0.727 |
+
+### Caveat: `Health_condition` nearly determines the label
+
+In this dataset every student with `Health_condition = Critical` is labelled depressed and
+every student with `Good` is not (`Abnormal` is 55% depressed, `Normal` 5%). The model
+leans almost entirely on that one column, which is why the full-feature scores are near
+perfect. If health condition is assessed together with (or after) the depression
+diagnosis, it leaks the answer, and the honest estimate is the run without it
+(ROC-AUC ~0.73). Without it, `Relationship_status`, `friend_circle` and `CGPA` are the
+most useful signals.
+
+## Project layout
+
+```
+pipeline/
+  config.py      paths, column groups, constants
+  data.py        download + load + clean
+  features.py    preprocessing (ColumnTransformer)
+  model.py       candidate models, CV comparison, training
+  evaluate.py    test metrics, feature importance, report
+  __main__.py    CLI that runs every step
+tests/
+  test_pipeline.py
+```
+
+`data/` and `artifacts/` are git-ignored; they are recreated by running the pipeline.

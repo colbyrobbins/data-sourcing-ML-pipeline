@@ -219,8 +219,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Project data (raw files are fetched reproducibly via data/manifest.json)
-data/raw/
-data/interim/
-data/processed/
-data/.tmp/
+# Pipeline outputs (data is downloaded on demand, models/reports are regenerated)
+data/
+artifacts/
