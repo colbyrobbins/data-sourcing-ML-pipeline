@@ -8,8 +8,13 @@ RAW_CSV = DATA_DIR / "raw" / "Student_Depression_Dataset.csv"
 ARTIFACTS_DIR = ROOT / "artifacts"
 
 KAGGLE_DATASET = "mkhoirulmustaqim/student-depression-detection-dataset"
-KAGGLE_DOWNLOAD_URL = f"https://www.kaggle.com/api/v1/datasets/download/{KAGGLE_DATASET}"
+KAGGLE_DATASET_VERSION = 1
+KAGGLE_DOWNLOAD_URL = (
+    f"https://www.kaggle.com/api/v1/datasets/download/{KAGGLE_DATASET}"
+    f"?datasetVersionNumber={KAGGLE_DATASET_VERSION}"
+)
 CSV_NAME_IN_ZIP = "Student_Depression_Dataset.csv"
+RAW_CSV_SHA256 = "563cf3a1890312822244bd4a6f12c2d78318cb7036e063b3d0c97a358c690556"
 
 TARGET = "Depression"
 POSITIVE_LABEL = "Yes"
