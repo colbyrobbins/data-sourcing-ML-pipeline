@@ -1,39 +1,43 @@
-"""Central configuration: paths, column groups, and constants."""
+"""Load config.yaml and resolve paths relative to the project root."""
 
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
-RAW_CSV = DATA_DIR / "raw" / "Student_Depression_Dataset.csv"
-ARTIFACTS_DIR = ROOT / "artifacts"
+DEFAULT_CONFIG = ROOT / "config.yaml"
 
-KAGGLE_DATASET = "mkhoirulmustaqim/student-depression-detection-dataset"
-KAGGLE_DATASET_VERSION = 1
-KAGGLE_DOWNLOAD_URL = (
-    f"https://www.kaggle.com/api/v1/datasets/download/{KAGGLE_DATASET}"
-    f"?datasetVersionNumber={KAGGLE_DATASET_VERSION}"
-)
-CSV_NAME_IN_ZIP = "Student_Depression_Dataset.csv"
-RAW_CSV_SHA256 = "563cf3a1890312822244bd4a6f12c2d78318cb7036e063b3d0c97a358c690556"
 
-TARGET = "Depression"
-POSITIVE_LABEL = "Yes"
+def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Read the YAML config. Relative paths inside it are resolved against the project root."""
+    path = Path(path) if path else DEFAULT_CONFIG
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
 
-NUMERIC_FEATURES = ["Age", "Current_semester", "CGPA", "Cost_without_study"]
-# Categories with a natural order are ordinal-encoded; the rest are one-hot encoded.
-ORDINAL_FEATURES = {
-    "Family_background": ["Lower Middle class", "Middle class", "Rich class"],
-    "Health_condition": ["Critical", "Abnormal", "Normal", "Good"],
-}
-NOMINAL_FEATURES = [
-    "Gender",
-    "Relationship_status",
-    "Marital_status",
-    "Living_style",
-    "friend_circle",
-    "Home_division",
-]
+    for key in ("raw_dir", "processed_dir"):
+        cfg["data"][key] = str(resolve(cfg["data"][key]))
+    cfg["output"]["model_dir"] = str(resolve(cfg["output"]["model_dir"]))
 
-TEST_SIZE = 0.2
-RANDOM_STATE = 42
-CV_FOLDS = 5
+    tracking = cfg["tracking"]
+    uri = tracking["tracking_uri"]
+    prefix = "sqlite:///"
+    if uri.startswith(prefix) and not uri[len(prefix):].startswith("/"):
+        # Relative SQLite path -> absolute, so runs land in one place from any cwd.
+        tracking["tracking_uri"] = prefix + str(resolve(uri[len(prefix):]))
+    artifacts = tracking.get("artifact_location") or "mlruns"
+    if "://" not in artifacts:
+        tracking["artifact_location"] = resolve(artifacts).as_uri()
+
+    if not cfg["features"].get("reference_date"):
+        cfg["features"]["reference_date"] = cfg["data"]["snapshot_date"]
+    return cfg
+
+
+def resolve(p: str | Path) -> Path:
+    p = Path(p)
+    return p if p.is_absolute() else ROOT / p
+
+
+def snapshot_filename(cfg: dict) -> str:
+    return f"cards_{cfg['data']['snapshot_date']}.parquet"

@@ -1,1 +1,1 @@
-"""Simple ML pipeline for the Kaggle Student Depression Detection dataset."""
+"""Pokémon card fair-value pipeline: ingest TCGplayer prices, train, track, and predict."""

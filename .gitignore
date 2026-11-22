@@ -222,3 +222,7 @@ __marimo__/
 # Pipeline outputs (data is downloaded on demand, models/reports are regenerated)
 data/
 artifacts/
+
+# MLflow tracking (local database and run files)
+mlflow.db
+mlruns/
