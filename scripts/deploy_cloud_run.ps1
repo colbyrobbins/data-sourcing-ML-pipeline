@@ -11,12 +11,6 @@ $ImageTag = "gcr.io/$ProjectId/${ServiceName}:latest"
 Write-Host "==> Setting gcloud project to: $ProjectId"
 gcloud config set project $ProjectId
 
-if (-not (Test-Path "artifacts/model.joblib") -or -not (Test-Path "artifacts/model_metadata.json")) {
-    Write-Host "==> Training Pokémon model and building search index..."
-    python -m pipeline.train
-    python -m pipeline.search build
-}
-
 Write-Host "==> Enabling required GCP services (Cloud Build, Cloud Run)..."
 gcloud services enable cloudbuild.googleapis.com run.googleapis.com
 

@@ -23,9 +23,8 @@ data:
 
 storage:
   # Where training reads the cleaned snapshot from: "gcs" or "local".
-  # TODO: switch to gcs once the bucket exists and the snapshot is uploaded.
-  backend: local
-  gcs_bucket: ""                # e.g. pokemon-fair-value-data (set this once the bucket exists)
+  backend: gcs
+  gcs_bucket: "data-sourcing-ml-pipeline-data"
   gcs_prefix: snapshots
 
 features:

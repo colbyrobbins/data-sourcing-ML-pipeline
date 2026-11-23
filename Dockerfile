@@ -38,6 +38,12 @@ ENV GIT_COMMIT=${GIT_COMMIT}
 
 # Code, plus the trained model and search index if they exist (see .dockerignore).
 COPY . .
+
+# Train model and build search index if not already present in the build context
+RUN if [ ! -f "artifacts/model.joblib" ]; then \
+      python -m pipeline.train && python -m pipeline.search build; \
+    fi
+
 RUN chmod +x docker-entrypoint.sh \
     && useradd --create-home --uid 1000 app \
     && chown -R app:app /app

@@ -18,12 +18,6 @@ IMAGE_TAG="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:latest"
 echo "==> Setting gcloud project to: $PROJECT_ID"
 gcloud config set project "$PROJECT_ID"
 
-if [ ! -f "artifacts/model.joblib" ] || [ ! -f "artifacts/model_metadata.json" ]; then
-    echo "==> Training Pokémon model and building search index..."
-    python3 -m pipeline.train
-    python3 -m pipeline.search build
-fi
-
 echo "==> Enabling required GCP services (Cloud Build, Cloud Run)..."
 gcloud services enable cloudbuild.googleapis.com run.googleapis.com
 
