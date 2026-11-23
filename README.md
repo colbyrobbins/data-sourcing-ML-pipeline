@@ -82,11 +82,12 @@ Feature engineering lives inside the saved model, so the API only has to pass ra
 
 Validation scores for each candidate:
 
-| Model | RMSE (log) | R² (log) |
-|---|---|---|
-| **Histogram gradient boosting** | **0.645** | **0.806** |
-| Random forest | 0.661 | 0.796 |
-| Ridge regression | 0.937 | 0.590 |
+| Model | RMSE (log) | R² (log) | Notes |
+|---|---|---|---|
+| **Two-Stage Hurdle Outlier** | **0.628** | **0.817** | **Classifier gate + specialized bulk/chase regressors with soft blending** |
+| Histogram gradient boosting | 0.645 | 0.806 | Baseline tree regressor |
+| Random forest | 0.661 | 0.796 | Baseline forest |
+| Ridge regression | 0.937 | 0.590 | Baseline linear model |
 
 The best model, refit on train + validation and scored once on the held-out test set
 (6,358 cards):
@@ -248,6 +249,24 @@ curl -s -X POST http://127.0.0.1:8080/predict -H "Content-Type: application/json
 - `CONFIG_PATH`: config file to read. Defaults to `config.yaml`.
 - `ENABLE_SEARCH=0`: serve `/predict` only, without loading the search index or embedding model.
 
+## Front-End Application (Streamlit)
+
+A web interface is included in `frontend/app.py` for end users to search cards, view card art, and evaluate asking prices against the deployed model API.
+
+### Run locally:
+```bash
+streamlit run frontend/app.py
+```
+By default, the front end connects to `http://127.0.0.1:8080`. You can paste your live Google Cloud Run URL directly into the sidebar setting.
+
+### Deploy to Streamlit Community Cloud:
+1. Push your repository to GitHub.
+2. Sign in to [share.streamlit.io](https://share.streamlit.io).
+3. Click **New app**, select this repository and branch.
+4. Set Main file path to: `frontend/app.py`.
+5. Under **Advanced settings**, set environment variable `API_URL` to your deployed Cloud Run URL.
+6. Deploy! Your app is now live and publicly accessible.
+
 ## Docker
 
 One image runs every part of the project. The first argument picks the command, and with no
@@ -293,15 +312,32 @@ server doesn't download it at startup. Measured on an Apple Silicon Mac: the ima
 the server is ready about 8 seconds after start, and `train` (model plus search index) takes about
 4 minutes. Training in the container gives exactly the same test metrics as training locally.
 
-## Cloud storage
+## Cloud Deployment (GCP)
 
-The cleaned snapshot is stored in a Google Cloud Storage bucket at
-`gs://<bucket>/snapshots/cards_<date>.parquet`. The bucket name goes in `config.yaml` under
-`storage.gcs_bucket`.
+Automated scripts are provided under `scripts/` to set up cloud storage and deploy the API to Google Cloud Run.
 
-To upload, sign in with `gcloud auth application-default login` and then run
-`python -m pipeline.ingest --upload`. If the bucket allows public reads, training can download
-the snapshot without credentials.
+### 1. Cloud Storage Setup
+Create your GCS bucket, set public read access for reproducible training, and upload the snapshot:
+
+```bash
+# Bash (Linux/macOS)
+./scripts/setup_gcs.sh <YOUR_PROJECT_ID> <YOUR_BUCKET_NAME> [REGION]
+
+# PowerShell (Windows)
+.\scripts\setup_gcs.ps1 -ProjectId "<YOUR_PROJECT_ID>" -BucketName "<YOUR_BUCKET_NAME>"
+```
+
+### 2. Deploy API to Google Cloud Run
+Build the container image using Google Cloud Build and deploy to Cloud Run:
+
+```bash
+# Bash (Linux/macOS)
+./scripts/deploy_cloud_run.sh <YOUR_PROJECT_ID> [SERVICE_NAME] [REGION]
+
+# PowerShell (Windows)
+.\scripts\deploy_cloud_run.ps1 -ProjectId "<YOUR_PROJECT_ID>"
+```
+The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value-api-xxxx.a.run.app`).
 
 ## Roadmap
 
@@ -309,18 +345,21 @@ the snapshot without credentials.
 - [x] `config.yaml`-driven, reproducible training with a train/validation/test split
 - [x] MLflow experiment tracking
 - [x] Semantic card search index (ChromaDB + sentence-transformers, hybrid ranking)
-- [ ] Create the GCS bucket, upload the snapshot, and switch `storage.backend` to `gcs`
+- [x] Two-Stage Hurdle Outlier model for high-value card pricing
+- [x] GCS setup script and public snapshot hosting
 - [x] FastAPI `/predict` and `/search` endpoints
 - [x] Dockerfile with ingest, train, serve, test and MLflow UI entry points
-- [ ] Deploy the API to Google Cloud Run
-- [ ] Streamlit front end, hosted publicly
-- [ ] Links to the live API and app
+- [x] Google Cloud Run deployment script
+- [x] Streamlit front-end application (`frontend/app.py`)
+- [ ] Live deployed URLs added to README (after GCP & Streamlit Cloud creation)
 
 ## Limitations and ethics
 
-- **Unpriced factors:** the model doesn't know a Pokémon's popularity beyond a few name
-  flags, a card's condition or grading, or recent hype such as tournament results and social
-  media. It is weakest on rare high-value cards, which matter most to buyers.
+- **Unpriced factors:** the model doesn't know a Pokémon's popularity beyond name flags,
+  a card's condition or physical grading (PSA/CGC), or recent tournament hype.
+- **Outlier dynamics:** extreme high-value chase cards are governed by collector sentiment
+  that is partly uncoupled from game mechanics. The two-stage hurdle model isolates these
+  cards to mitigate distortion.
 - **Snapshot in time:** market prices move, and a model trained on one day's prices goes
   stale. Re-ingest and retrain regularly.
 - **Who benefits:** a "deal finder" mostly helps resellers buy underpriced cards. That can
@@ -336,14 +375,20 @@ config.yaml           pipeline configuration
 requirements.txt      pinned dependencies
 Dockerfile            one image: ingest / train / serve / test / mlflow-ui
 docker-entrypoint.sh
+frontend/
+  app.py              Streamlit web app: search, preview, deal calculator
+  requirements.txt    Streamlit cloud dependencies
+scripts/
+  setup_gcs.sh / ps1        create GCS bucket & upload snapshot
+  deploy_cloud_run.sh / ps1 build and deploy API to Cloud Run
 api/
   main.py             FastAPI app: /health, /predict, /search
 pipeline/
   ingest.py           TCGCSV -> cleaned snapshot (-> GCS)
   storage.py          GCS helpers
   data.py             load + verify snapshot, train/val/test split
-  features.py         CardFeatures transformer, raw input schema
-  model.py            candidate models
+  features.py         CardFeatures transformer, vintage & chase flags
+  model.py            candidate models (hist_gbm, hurdle_outlier, random_forest, ridge)
   evaluate.py         metrics and plots
   train.py            training + MLflow tracking
   predict.py          fair value + verdict (used by the API)

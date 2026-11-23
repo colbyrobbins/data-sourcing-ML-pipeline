@@ -47,6 +47,8 @@ class CardFeatures(BaseEstimator, TransformerMixin):
         ref = pd.Timestamp(self.reference_date)
         published = pd.to_datetime(X["set_published"], errors="coerce")
         X["set_age_years"] = (ref - published).dt.days / 365.25
+        # Vintage cards (pre-2004, Wizards of the Coast era) carry collector premiums
+        X["is_vintage"] = (published < pd.Timestamp("2004-01-01")).fillna(False).astype(float)
 
         numbers = X["number"].astype("string").str.extract(_NUMBER_PATTERN)
         X["card_number"] = pd.to_numeric(numbers[0], errors="coerce")
