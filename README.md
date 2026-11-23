@@ -8,8 +8,8 @@ The model needs details like rarity and collector number, so the app starts with
 card search**. You type "charizard ex 151" or "fiery flying dragon", pick the card, and its
 details go straight to the model.
 
-> **Status:** the data, training and search pipeline is in place. The API, Docker image,
-> cloud deployment and front end are still to come (see [Roadmap](#roadmap)).
+> **Status:** the data, training and search pipeline, the API, and the Docker image are in
+> place. Cloud deployment and the front end are still to come (see [Roadmap](#roadmap)).
 
 ## Problem
 
@@ -140,7 +140,7 @@ This writes `artifacts/model.joblib` and `artifacts/model_metadata.json`, and lo
 ### 3. Look at experiments
 
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
 ```
 
 Then open <http://127.0.0.1:5000>. Each training run has one child run per candidate model,
@@ -206,6 +206,92 @@ The tests run offline on synthetic TCGCSV-shaped data and cover:
 - feature engineering, and that the split keeps each card's printings together
 - an end-to-end training run with MLflow logging, and prediction
 - building and querying the search index (with a stand-in embedder, so no model download)
+- the API's endpoints and input validation (with a fake model and search)
+
+## API
+
+The service in `api/main.py` is built with FastAPI. Interactive docs are served at `/docs`.
+
+| Endpoint | Input | Output |
+|---|---|---|
+| `GET /health` | | model name, snapshot date, test metrics, whether search is loaded |
+| `POST /predict` | card fields as JSON (`name` and `rarity` required) plus optional `asking_price` | `fair_value`, and `verdict` (`deal` / `fair` / `overpriced`) when an asking price is given |
+| `GET /search?q=...&k=5` | free-text query, 1–25 results | matching cards with images, market price per printing, and a ready-to-send `card` body for `/predict` |
+
+Run it locally (after training and building the search index):
+
+```bash
+uvicorn api.main:app --port 8080
+```
+
+```bash
+curl -s http://127.0.0.1:8080/health
+```
+
+```bash
+curl -s -G http://127.0.0.1:8080/search --data-urlencode "q=umbreon vmax alternate art" -d k=3
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/predict -H "Content-Type: application/json" -d '{
+  "name": "Charizard ex - 199/165", "rarity": "Special Illustration Rare", "printing": "Holofoil",
+  "card_type": "Fire", "stage": "Stage 2", "hp": 330, "retreat_cost": 2, "number": "199/165",
+  "set_published": "2023-09-22", "has_attack2": true, "asking_price": 120}'
+```
+
+```json
+{"fair_value": 288.81, "asking_price": 120.0, "verdict": "deal", "model_name": "hist_gbm", "snapshot_date": "2026-11-22"}
+```
+
+**Settings (environment variables)**
+- `MODEL_DIR`: folder with the model files. Defaults to `artifacts/`.
+- `CONFIG_PATH`: config file to read. Defaults to `config.yaml`.
+- `ENABLE_SEARCH=0`: serve `/predict` only, without loading the search index or embedding model.
+
+## Docker
+
+One image runs every part of the project. The first argument picks the command, and with no
+argument it serves the API.
+
+**1. Build the image**
+
+```bash
+docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t pokemon-fair-value .
+```
+
+`GIT_COMMIT` is optional. It lets MLflow runs inside the container record which commit they came from.
+
+**2. Train and build the search index inside the container**
+
+Mount `data/` to read the snapshot and `artifacts/` to keep the outputs. MLflow runs from the
+container go to `mlruns-docker/` because the file paths MLflow records differ between your
+machine and the container.
+
+```bash
+docker run --rm -v "$PWD/data:/app/data" -v "$PWD/artifacts:/app/artifacts" -v "$PWD/mlruns-docker:/app/mlruns" pokemon-fair-value train
+```
+
+**3. Rebuild and serve**
+
+The image includes `artifacts/` when it exists, so rebuild after training and the server
+needs no mounts. That's also how the image is deployed.
+
+```bash
+docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t pokemon-fair-value . && docker run --rm -p 8080:8080 pokemon-fair-value
+```
+
+**Other commands**
+
+```bash
+docker run --rm pokemon-fair-value test                       # run the test suite in the container
+docker run --rm -v "$PWD/data:/app/data" pokemon-fair-value ingest   # fetch a new snapshot
+docker run --rm -p 5000:5000 -v "$PWD/mlruns-docker:/app/mlruns" pokemon-fair-value mlflow-ui
+```
+
+The image installs the CPU-only build of PyTorch, and it includes the embedding model so the
+server doesn't download it at startup. Measured on an Apple Silicon Mac: the image is about 1.1 GB,
+the server is ready about 8 seconds after start, and `train` (model plus search index) takes about
+4 minutes. Training in the container gives exactly the same test metrics as training locally.
 
 ## Cloud storage
 
@@ -224,8 +310,8 @@ the snapshot without credentials.
 - [x] MLflow experiment tracking
 - [x] Semantic card search index (ChromaDB + sentence-transformers, hybrid ranking)
 - [ ] Create the GCS bucket, upload the snapshot, and switch `storage.backend` to `gcs`
-- [ ] FastAPI `/predict` and `/search` endpoints using `pipeline.predict` and `pipeline.search`
-- [ ] Dockerfile with training and serving entry points
+- [x] FastAPI `/predict` and `/search` endpoints
+- [x] Dockerfile with ingest, train, serve, test and MLflow UI entry points
 - [ ] Deploy the API to Google Cloud Run
 - [ ] Streamlit front end, hosted publicly
 - [ ] Links to the live API and app
@@ -247,7 +333,11 @@ the snapshot without credentials.
 
 ```
 config.yaml           pipeline configuration
-requirements.txt
+requirements.txt      pinned dependencies
+Dockerfile            one image: ingest / train / serve / test / mlflow-ui
+docker-entrypoint.sh
+api/
+  main.py             FastAPI app: /health, /predict, /search
 pipeline/
   ingest.py           TCGCSV -> cleaned snapshot (-> GCS)
   storage.py          GCS helpers
@@ -261,6 +351,7 @@ pipeline/
 tests/
   test_pipeline.py
   test_search.py
+  test_api.py
 ```
 
-`data/`, `artifacts/`, `mlruns/` and `mlflow.db` are git-ignored and recreated by the pipeline.
+`data/`, `artifacts/` and `mlruns/` (which holds `mlflow.db`) are git-ignored and recreated by the pipeline.
