@@ -23,6 +23,7 @@ from . import storage
 from .config import load_config, snapshot_filename
 
 USER_AGENT = "aipi510-pokemon-fair-value/0.1 (student project)"
+ATTACK_FIELDS = ("Attack 1", "Attack 2", "Attack 3", "Attack 4")
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +114,9 @@ def build_table(raw_dir: Path) -> pd.DataFrame:
                     "weakness": ext.get("Weakness"),
                     "resistance": ext.get("Resistance"),
                     "has_attack2": "Attack 2" in ext,
+                    # Free text, used by the semantic search index (not by the price model).
+                    "attacks": " | ".join(ext[a] for a in ATTACK_FIELDS if ext.get(a)) or None,
+                    "card_text": ext.get("CardText"),
                     "image_url": product.get("imageUrl"),
                     "url": product.get("url"),
                 }
@@ -132,6 +136,8 @@ def clean(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
     for col in ("name", "rarity", "printing", "card_type", "stage", "number", "set_name"):
         out[col] = out[col].astype("string").str.strip()
+    for col in ("attacks", "card_text"):
+        out[col] = _plain_text(out[col])
 
     # Always float so missing values (trainers have no HP) are representable.
     out["hp"] = pd.to_numeric(out["hp"], errors="coerce").astype(float)
@@ -146,6 +152,17 @@ def clean(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         ["group_id", "product_id", "printing"]
     )
     return out.reset_index(drop=True)
+
+
+def _plain_text(s: pd.Series) -> pd.Series:
+    """Strip HTML tags and collapse whitespace in TCGplayer's card text."""
+    return (
+        s.astype("string")
+        .str.replace(r"<[^>]+>", " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+        .replace("", pd.NA)
+    )
 
 
 def sha256_of(path: Path) -> str:

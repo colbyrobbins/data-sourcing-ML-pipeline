@@ -18,6 +18,8 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     for key in ("raw_dir", "processed_dir"):
         cfg["data"][key] = str(resolve(cfg["data"][key]))
     cfg["output"]["model_dir"] = str(resolve(cfg["output"]["model_dir"]))
+    if "search" in cfg:
+        cfg["search"]["index_dir"] = str(resolve(cfg["search"]["index_dir"]))
 
     tracking = cfg["tracking"]
     uri = tracking["tracking_uri"]

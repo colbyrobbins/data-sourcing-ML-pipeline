@@ -12,7 +12,7 @@ data:
   snapshot_date: "2026-11-22"
   # SHA-256 of the cleaned snapshot file. Training refuses a file that doesn't
   # match. Leave empty to skip the check (e.g. right after making a new snapshot).
-  snapshot_sha256: "add85e7db2f03714baddc74dc9a9d0bed7734a7ab690131ff6610ea0e65fbd50"
+  snapshot_sha256: "7bfebb6c1ba646c350dac62a0c94cc65ef4ac7d6fe0e68d6eb121ab86119fd9d"
 
   raw_dir: data/raw             # raw TCGCSV JSON, one folder per snapshot date
   processed_dir: data/processed # cleaned snapshots (parquet)
@@ -85,3 +85,16 @@ tracking:
 
 output:
   model_dir: artifacts
+
+search:
+  # Semantic search over the snapshot's cards, used to look a card up by
+  # name or description before asking the model for its fair value.
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  index_dir: artifacts/search_index   # ChromaDB persistent folder
+  collection: cards
+  batch_size: 256
+  default_top_k: 5
+  # Hybrid ranking: take this many nearest cards by embedding, then add
+  # keyword_weight x (share of query words found in name/set/number/rarity).
+  candidate_pool: 50
+  keyword_weight: 0.5
