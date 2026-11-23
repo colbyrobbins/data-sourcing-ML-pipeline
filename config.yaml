@@ -79,7 +79,7 @@ tracking:
   experiment_name: pokemon-fair-value
   # Local SQLite database by default (relative paths are resolved from the
   # project root). Set to a server URL, e.g. http://host:5000, to share runs.
-  tracking_uri: sqlite:///mlflow.db
+  tracking_uri: sqlite:///mlruns/mlflow.db
   # Where run files (models, plots) are stored for new experiments.
   artifact_location: mlruns
 

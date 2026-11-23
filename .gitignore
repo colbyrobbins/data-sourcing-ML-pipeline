@@ -226,3 +226,4 @@ artifacts/
 # MLflow tracking (local database and run files)
 mlflow.db
 mlruns/
+mlruns-docker/

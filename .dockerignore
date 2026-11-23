@@ -1,0 +1,15 @@
+# Allow-list: only what the image needs.
+*
+!config.yaml
+!requirements.txt
+!docker-entrypoint.sh
+!pipeline/
+!api/
+!tests/
+# Trained model and search index, baked in for serving when present.
+!artifacts/model.joblib
+!artifacts/model_metadata.json
+!artifacts/search_index/
+
+**/__pycache__
+**/*.pyc

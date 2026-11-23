@@ -11,6 +11,7 @@ train and compare on validation -> refit the best on train + val -> score once o
 
 import argparse
 import json
+import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -29,6 +30,8 @@ from .model import build_model
 
 
 def _git_commit() -> str | None:
+    if os.environ.get("GIT_COMMIT"):  # set at Docker build time (the image has no .git)
+        return os.environ["GIT_COMMIT"]
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL
@@ -38,7 +41,10 @@ def _git_commit() -> str | None:
 
 
 def _setup_tracking(tracking: dict) -> None:
-    mlflow.set_tracking_uri(tracking["tracking_uri"])
+    uri = tracking["tracking_uri"]
+    if uri.startswith("sqlite:///"):
+        Path(uri[len("sqlite:///"):]).parent.mkdir(parents=True, exist_ok=True)
+    mlflow.set_tracking_uri(uri)
     name = tracking["experiment_name"]
     if mlflow.get_experiment_by_name(name) is None:
         mlflow.create_experiment(name, artifact_location=tracking["artifact_location"])
