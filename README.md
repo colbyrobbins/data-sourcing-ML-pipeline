@@ -4,8 +4,12 @@ AIPI 510 Module Project 3: a reproducible ML pipeline that estimates the fair ma
 a Pokémon trading card from its attributes, so a buyer can tell whether an asking price is a
 **deal**, **fair**, or **overpriced**.
 
-> **Status:** the data and training pipeline is in place. The API, Docker image, cloud
-> deployment and front end are still to come (see [Roadmap](#roadmap)).
+The model needs details like rarity and collector number, so the app starts with a **semantic
+card search**. You type "charizard ex 151" or "fiery flying dragon", pick the card, and its
+details go straight to the model.
+
+> **Status:** the data, training and search pipeline is in place. The API, Docker image,
+> cloud deployment and front end are still to come (see [Roadmap](#roadmap)).
 
 ## Problem
 
@@ -28,7 +32,7 @@ a Pokémon trading card from its attributes, so a buyer can tell whether an aski
 | Source | [TCGCSV](https://tcgcsv.com), a free nightly mirror of TCGplayer's catalog and prices (category 3 = Pokémon) |
 | Snapshot | `2026-11-22`: 222 sets, 45,807 product/printing rows |
 | After cleaning | **42,326** single cards with a market price |
-| Cleaning | drop sealed products (no rarity), code cards, unconfirmed rarities and rows without a price; parse HP, retreat cost and dates |
+| Cleaning | drop sealed products (no rarity), code cards, unconfirmed rarities and rows without a price; parse HP, retreat cost and dates; strip HTML from attack and card text |
 | Storage | the cleaned snapshot is a single parquet file, uploaded to Google Cloud Storage (see [Cloud storage](#cloud-storage)) |
 
 TCGCSV prices change every day, so the pipeline never trains on live data. `pipeline.ingest`
@@ -54,7 +58,9 @@ TCGCSV API ──► ingest.py ──► cleaned snapshot (parquet) ──► GC
                             │
                score once on test ─► MLflow (params, metrics, plots, model)
                             │
-                artifacts/model.joblib + model_metadata.json ─► API
+                artifacts/model.joblib + model_metadata.json ─► API /predict
+
+              snapshot ──► search.py build ──► ChromaDB index ─► API /search
 ```
 
 | Module | Role |
@@ -67,6 +73,7 @@ TCGCSV API ──► ingest.py ──► cleaned snapshot (parquet) ──► GC
 | `pipeline/train.py` | Run the pipeline and log everything to MLflow |
 | `pipeline/evaluate.py` | Metrics and diagnostic plots |
 | `pipeline/predict.py` | Load the model and predict fair values / deal verdicts. This is what the API calls |
+| `pipeline/search.py` | Build a ChromaDB index of every card (sentence-transformer embeddings) and search it. Results come back ready to send to the model |
 | `config.yaml` | Every setting: data source, snapshot, storage, features, split sizes, model hyperparameters, tracking |
 
 Feature engineering lives inside the saved model, so the API only has to pass raw card fields.
@@ -157,6 +164,36 @@ python -m pipeline.predict '{"name": "Charizard ex - 199/165", "rarity": "Specia
 
 A price more than 15% below fair value is a deal, and more than 15% above is overpriced.
 
+### 5. Search for a card
+
+```bash
+python -m pipeline.search build                           # embed all 28,310 cards (~75 s, downloads the model once)
+python -m pipeline.search query "charizard ex 151"
+```
+
+```
+1.142  Charizard ex - 199/165  [SV: Scarlet & Violet 151, Special Illustration Rare]  Holofoil $279.37
+1.120  Charizard ex - 183/165  [SV: Scarlet & Violet 151, Ultra Rare]  Holofoil $31.00
+1.106  Charizard ex - 006/165  [SV: Scarlet & Violet 151, Double Rare]  Holofoil $7.24
+```
+
+**How search works:** this builds on Colby's
+[semantic search activity](https://github.com/colbyrobbins/Semantic-Search-Engine).
+- **Index:** each card becomes one document: name, set, year, rarity, type, HP, printings,
+  attacks and card text. Documents are embedded with
+  `sentence-transformers/all-MiniLM-L6-v2` and stored in ChromaDB under `artifacts/search_index/`.
+- **Two kinds of query:** embeddings alone handle descriptions well ("fiery flying dragon",
+  "discard your hand and draw 7 cards"). They often miss exact lookups such as
+  "charizard ex 199/165", where a person types a name and number.
+- **Hybrid ranking:** candidates come from both the nearest embeddings and the best keyword
+  matches on name, set, number, rarity and printing. The score is cosine similarity plus
+  `keyword_weight` times the keyword match. Rare words count more (IDF weighting), so
+  "charizard" matters more than "set".
+- **Speed:** a search takes about 30 ms once the model is loaded.
+- **Using results:** `model_input(card, printing)` turns a result into the model's input fields.
+
+Settings are under `search:` in `config.yaml`.
+
 ### Tests
 
 ```bash
@@ -168,6 +205,7 @@ The tests run offline on synthetic TCGCSV-shaped data and cover:
 - the checksum check and GCS download (mocked)
 - feature engineering, and that the split keeps each card's printings together
 - an end-to-end training run with MLflow logging, and prediction
+- building and querying the search index (with a stand-in embedder, so no model download)
 
 ## Cloud storage
 
@@ -184,8 +222,9 @@ the snapshot without credentials.
 - [x] Data sourcing, cleaning and dated snapshots (TCGCSV)
 - [x] `config.yaml`-driven, reproducible training with a train/validation/test split
 - [x] MLflow experiment tracking
+- [x] Semantic card search index (ChromaDB + sentence-transformers, hybrid ranking)
 - [ ] Create the GCS bucket, upload the snapshot, and switch `storage.backend` to `gcs`
-- [ ] FastAPI `/predict` endpoint using `pipeline.predict`
+- [ ] FastAPI `/predict` and `/search` endpoints using `pipeline.predict` and `pipeline.search`
 - [ ] Dockerfile with training and serving entry points
 - [ ] Deploy the API to Google Cloud Run
 - [ ] Streamlit front end, hosted publicly
@@ -218,8 +257,10 @@ pipeline/
   evaluate.py         metrics and plots
   train.py            training + MLflow tracking
   predict.py          fair value + verdict (used by the API)
+  search.py           semantic card search (used by the API)
 tests/
   test_pipeline.py
+  test_search.py
 ```
 
 `data/`, `artifacts/`, `mlruns/` and `mlflow.db` are git-ignored and recreated by the pipeline.
