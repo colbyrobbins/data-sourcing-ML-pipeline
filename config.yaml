@@ -9,10 +9,10 @@ data:
 
   # Snapshot the pipeline trains on. TCGCSV prices change daily, so training
   # always reads a frozen, dated snapshot instead of live data.
-  snapshot_date: "2026-11-22"
+  snapshot_date: "2026-11-23"
   # SHA-256 of the cleaned snapshot file. Training refuses a file that doesn't
   # match. Leave empty to skip the check (e.g. right after making a new snapshot).
-  snapshot_sha256: "7bfebb6c1ba646c350dac62a0c94cc65ef4ac7d6fe0e68d6eb121ab86119fd9d"
+  snapshot_sha256: ""
 
   raw_dir: data/raw             # raw TCGCSV JSON, one folder per snapshot date
   processed_dir: data/processed # cleaned snapshots (parquet)
@@ -70,7 +70,7 @@ model:
       min_samples_leaf: 20
       l2_regularization: 0.0
     random_forest:
-      n_estimators: 300
+      n_estimators: 150
       min_samples_leaf: 3
       max_features: 0.5
     ridge:
