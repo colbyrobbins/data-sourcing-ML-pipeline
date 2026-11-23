@@ -1,0 +1,100 @@
+# Pipeline configuration for the Pokémon card fair-value model.
+# Every script reads this file; pass --config to use a different one.
+
+data:
+  # TCGCSV mirrors TCGplayer's catalog and prices. Category 3 = Pokémon.
+  source_url: https://tcgcsv.com/tcgplayer
+  category_id: 3
+  request_delay_seconds: 0.15   # be polite to the free community service
+
+  # Snapshot the pipeline trains on. TCGCSV prices change daily, so training
+  # always reads a frozen, dated snapshot instead of live data.
+  snapshot_date: "2026-11-22"
+  # SHA-256 of the cleaned snapshot file. Training refuses a file that doesn't
+  # match. Leave empty to skip the check (e.g. right after making a new snapshot).
+  snapshot_sha256: "7bfebb6c1ba646c350dac62a0c94cc65ef4ac7d6fe0e68d6eb121ab86119fd9d"
+
+  raw_dir: data/raw             # raw TCGCSV JSON, one folder per snapshot date
+  processed_dir: data/processed # cleaned snapshots (parquet)
+
+  # Rarities that aren't collectible cards or have no reliable label.
+  drop_rarities: ["Code Card", "Unconfirmed"]
+  min_price: 0.01
+
+storage:
+  # Where training reads the cleaned snapshot from: "gcs" or "local".
+  # TODO: switch to gcs once the bucket exists and the snapshot is uploaded.
+  backend: local
+  gcs_bucket: ""                # e.g. pokemon-fair-value-data (set this once the bucket exists)
+  gcs_prefix: snapshots
+
+features:
+  # Set age is measured against this date so runs are reproducible.
+  # Defaults to the snapshot date when empty.
+  reference_date: ""
+  categorical: [rarity, printing, card_type, stage]
+  # set_age_years, card_number, set_size and is_secret_number are derived
+  # from set_published and the card's "Number" field (e.g. "199/165").
+  numeric: [set_age_years, hp, retreat_cost, card_number, set_size, is_secret_number,
+            has_attack2, is_supplemental]
+  # Binary flags derived from the card name (regex, case-sensitive).
+  name_flags:
+    is_ex: '\bex\b'
+    is_gx: '\bGX\b'
+    is_v: '\bV\b'
+    is_vmax_vstar: 'VMAX|VSTAR'
+    is_full_art: 'Full Art'
+    is_alt_art: 'Alternate Art|Alt Art'
+    is_charizard: 'Charizard'
+    is_pikachu: 'Pikachu'
+
+split:
+  # Split by product so different printings of one card stay together.
+  group_column: product_id
+  test_size: 0.15
+  val_size: 0.15                # share of the full dataset
+  random_state: 42
+
+model:
+  # Candidates are trained on the train split and compared on validation
+  # RMSE of log price. The best is refit on train + validation and scored
+  # once on the test split.
+  target: market_price
+  selection_metric: rmse_log
+  candidates:
+    hist_gbm:
+      max_iter: 400
+      learning_rate: 0.08
+      max_leaf_nodes: 31
+      min_samples_leaf: 20
+      l2_regularization: 0.0
+    random_forest:
+      n_estimators: 300
+      min_samples_leaf: 3
+      max_features: 0.5
+    ridge:
+      alpha: 1.0
+
+tracking:
+  experiment_name: pokemon-fair-value
+  # Local SQLite database by default (relative paths are resolved from the
+  # project root). Set to a server URL, e.g. http://host:5000, to share runs.
+  tracking_uri: sqlite:///mlruns/mlflow.db
+  # Where run files (models, plots) are stored for new experiments.
+  artifact_location: mlruns
+
+output:
+  model_dir: artifacts
+
+search:
+  # Semantic search over the snapshot's cards, used to look a card up by
+  # name or description before asking the model for its fair value.
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  index_dir: artifacts/search_index   # ChromaDB persistent folder
+  collection: cards
+  batch_size: 256
+  default_top_k: 5
+  # Hybrid ranking: take this many nearest cards by embedding, then add
+  # keyword_weight x (share of query words found in name/set/number/rarity).
+  candidate_pool: 50
+  keyword_weight: 0.5
