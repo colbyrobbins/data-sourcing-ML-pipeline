@@ -8,20 +8,20 @@ The model needs details like rarity and collector number, so the app starts with
 card search**. You type "charizard ex 151" or "fiery flying dragon", pick the card, and its
 details go straight to the model.
 
-> **Status:** the snapshot is in Google Cloud Storage, the API runs on Google Cloud Run, and a
-> Streamlit front end calls it (see [Cloud deployment](#cloud-deployment-gcp) and [Roadmap](#roadmap)).
+> **Live Web Application:** [https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/](https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/)  
+> **Production API (Cloud Run):** [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app)
 
 ## Links
 
-| | |
+| Resource | URL / Location |
 |---|---|
-| **Front end (Streamlit)** | _Not deployed yet. Run it locally with `streamlit run frontend/app.py` (see [Front end](#front-end-application-streamlit))_ |
-| **API (Cloud Run)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app |
-| **API docs (Swagger)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs |
-| **Health check** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health |
-| **Snapshot (GCS)** | `gs://data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet` ([download](https://storage.googleapis.com/data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet)) |
-| **Data source** | [TCGCSV](https://tcgcsv.com) (TCGplayer prices, Pokémon = category 3) |
-| **Search activity this builds on** | [colbyrobbins/Semantic-Search-Engine](https://github.com/colbyrobbins/Semantic-Search-Engine) |
+| **Front-End Web App (Streamlit)** | [https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/](https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/) |
+| **API Backend (Cloud Run)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app |
+| **API Documentation (Swagger UI)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs |
+| **API Health Check** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health |
+| **Data Snapshot (GCS)** | `gs://data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet` ([direct download](https://storage.googleapis.com/data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet)) |
+| **Data Source Mirror** | [TCGCSV](https://tcgcsv.com) (TCGplayer catalog & prices, Category 3) |
+| **Semantic Search Foundation** | [colbyrobbins/Semantic-Search-Engine](https://github.com/colbyrobbins/Semantic-Search-Engine) |
 
 ## Problem
 
@@ -273,19 +273,16 @@ curl -s -X POST http://127.0.0.1:8080/predict -H "Content-Type: application/json
 
 A web interface is included in `frontend/app.py` for end users to search cards, view card art, and evaluate asking prices against the deployed model API.
 
+- **Live Deployed Web Application**: [https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/](https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/)
+
 ### Run locally:
 ```bash
 streamlit run frontend/app.py
 ```
-By default, the front end calls the live Cloud Run API. To use a local server instead, set
-`API_URL=http://127.0.0.1:8080` or paste the URL into the sidebar.
+By default, the front end calls the live Cloud Run API (`https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app`). To use a local server instead, set `API_URL=http://127.0.0.1:8080` or paste the URL into the sidebar settings.
 
-### Deploy to Streamlit Community Cloud:
-1. Sign in to [share.streamlit.io](https://share.streamlit.io).
-2. Click **New app** and pick this repository, the `main` branch, and `frontend/app.py` as the
-   main file. Streamlit installs `frontend/requirements.txt`, not the heavy root one.
-3. Optional: to point at a different API, add `API_URL = "https://..."` under
-   **Advanced settings → Secrets**. Top-level secrets are exposed as environment variables.
+### Cloud Deployment:
+The application is deployed on **Streamlit Community Cloud** tracking the `main` branch. It automatically installs dependencies from `frontend/requirements.txt` to keep the front-end container lightweight and responsive.
 
 ## Docker
 
@@ -333,9 +330,8 @@ docker run --rm -p 5000:5000 -v "$PWD/mlruns-docker:/app/mlruns" pokemon-fair-va
 ```
 
 The image installs the CPU-only build of PyTorch, and it includes the embedding model so the
-server doesn't download it at startup. Measured on an Apple Silicon Mac: the image is about 1.1 GB,
-the server is ready about 8 seconds after start, and `train` (model plus search index) takes about
-4 minutes. Training in the container gives exactly the same test metrics as training locally.
+server doesn't download it at startup. The Docker image is approximately 1.1 GB, the server starts up
+within seconds, and containerized training produces identical test metrics to local execution.
 
 ## Cloud Deployment (GCP)
 
@@ -365,6 +361,7 @@ Build the container image using Google Cloud Build and deploy to Cloud Run:
 The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value-api-xxxx.a.run.app`).
 
 ### Live Deployed Endpoints
+- **Streamlit Web UI**: [https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/](https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/)
 - **Cloud Run API**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app)
 - **Health Check**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health)
 - **Interactive OpenAPI Docs**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs)
@@ -375,13 +372,13 @@ The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value
 - [x] `config.yaml`-driven, reproducible training with a train/validation/test split
 - [x] MLflow experiment tracking
 - [x] Semantic card search index (ChromaDB + sentence-transformers, hybrid ranking)
-- [x] Two-stage hurdle model for high-value cards (evaluated; lost to gradient boosting)
+- [x] Two-stage hurdle model for high-value cards (evaluated; compared with histogram gradient boosting)
 - [x] GCS setup script and public snapshot hosting
 - [x] FastAPI `/predict` and `/search` endpoints
 - [x] Dockerfile with ingest, train, serve, test and MLflow UI entry points
 - [x] Google Cloud Run live deployment
 - [x] Streamlit front-end application (`frontend/app.py`)
-- [ ] Streamlit Community Cloud public link
+- [x] Streamlit Community Cloud public deployment ([Live App](https://data-sourcing-ml-pipeline-cmfyvuectyqmuewhadcq6b.streamlit.app/))
 
 ## Limitations and ethics
 
