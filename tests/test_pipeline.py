@@ -186,6 +186,7 @@ def test_features_from_raw_fields(cfg):
     row = out.iloc[0]
     assert row["is_secret_number"] == 1.0 and row["card_number"] == 199 and row["set_size"] == 165
     assert row["is_charizard"] == 1.0 and row["is_ex"] == 1.0 and row["is_pikachu"] == 0.0
+    assert row["is_vintage"] == 0.0
     assert row["set_age_years"] == pytest.approx(1.0, abs=0.01)  # reference date 2026-01-01
     assert out.iloc[1]["card_type"] == "missing" and np.isnan(out.iloc[1]["hp"])
 
@@ -237,3 +238,31 @@ def test_price_verdict():
     assert price_verdict(50, 100) == "deal"
     assert price_verdict(100, 100) == "fair"
     assert price_verdict(150, 100) == "overpriced"
+
+
+def test_hurdle_outlier_model_build_and_predict(cfg):
+    from pipeline.model import TwoStageHurdleRegressor, build_model
+
+    config, _ = cfg
+    model = build_model(
+        "hurdle_outlier",
+        {"threshold_price": 20.0, "min_samples_leaf": 2, "clf_max_iter": 20, "reg_max_iter": 20},
+        config,
+    )
+    df = pd.DataFrame(
+        [
+            {"name": "Pikachu", "rarity": "Common", "printing": "Normal", "set_published": "2020-01-01"},
+            {"name": "Charizard ex", "rarity": "Special Illustration Rare", "printing": "Holofoil", "set_published": "2020-01-01"},
+            {"name": "Umbreon VMAX", "rarity": "Special Illustration Rare", "printing": "Holofoil", "set_published": "1999-01-01"},
+        ]
+        * 10
+    )
+    # y with bulk (< 20) and high-value (> 50)
+    y = np.array([0.5, 80.0, 350.0] * 10)
+    model.fit(df, y)
+    preds = model.predict(df)
+    assert len(preds) == len(df)
+    assert all(p > 0 for p in preds)
+    # High-value chase card should be predicted higher than cheap bulk
+    assert preds[1] > preds[0]
+    assert preds[2] > preds[0]
