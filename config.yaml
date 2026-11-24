@@ -9,10 +9,10 @@ data:
 
   # Snapshot the pipeline trains on. TCGCSV prices change daily, so training
   # always reads a frozen, dated snapshot instead of live data.
-  snapshot_date: "2026-11-22"
+  snapshot_date: "2026-11-23"
   # SHA-256 of the cleaned snapshot file. Training refuses a file that doesn't
   # match. Leave empty to skip the check (e.g. right after making a new snapshot).
-  snapshot_sha256: "7bfebb6c1ba646c350dac62a0c94cc65ef4ac7d6fe0e68d6eb121ab86119fd9d"
+  snapshot_sha256: "7935b3660b72261e152cf76ee957d4fac12889dc8c5218cd6a858efefc2b5ff9"
 
   raw_dir: data/raw             # raw TCGCSV JSON, one folder per snapshot date
   processed_dir: data/processed # cleaned snapshots (parquet)
@@ -23,9 +23,8 @@ data:
 
 storage:
   # Where training reads the cleaned snapshot from: "gcs" or "local".
-  # TODO: switch to gcs once the bucket exists and the snapshot is uploaded.
-  backend: local
-  gcs_bucket: ""                # e.g. pokemon-fair-value-data (set this once the bucket exists)
+  backend: gcs
+  gcs_bucket: "data-sourcing-ml-pipeline-data"
   gcs_prefix: snapshots
 
 features:
@@ -36,7 +35,7 @@ features:
   # set_age_years, card_number, set_size and is_secret_number are derived
   # from set_published and the card's "Number" field (e.g. "199/165").
   numeric: [set_age_years, hp, retreat_cost, card_number, set_size, is_secret_number,
-            has_attack2, is_supplemental]
+            has_attack2, is_supplemental, is_vintage]
   # Binary flags derived from the card name (regex, case-sensitive).
   name_flags:
     is_ex: '\bex\b'
@@ -47,6 +46,8 @@ features:
     is_alt_art: 'Alternate Art|Alt Art'
     is_charizard: 'Charizard'
     is_pikachu: 'Pikachu'
+    is_eeveelution: 'Umbreon|Espeon|Sylveon|Eevee|Vaporeon|Jolteon|Flareon|Glaceon|Leafeon'
+    is_chase_legendary: 'Rayquaza|Lugia|Mew|Mewtwo|Gengar|Giratina|Arceus'
 
 split:
   # Split by product so different printings of one card stay together.
@@ -69,11 +70,16 @@ model:
       min_samples_leaf: 20
       l2_regularization: 0.0
     random_forest:
-      n_estimators: 300
+      n_estimators: 150
       min_samples_leaf: 3
       max_features: 0.5
     ridge:
       alpha: 1.0
+    hurdle_outlier:
+      threshold_price: 25.0
+      clf_max_iter: 150
+      clf_max_depth: 4
+      reg_max_iter: 300
 
 tracking:
   experiment_name: pokemon-fair-value
