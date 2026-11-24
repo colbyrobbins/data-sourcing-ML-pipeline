@@ -339,6 +339,11 @@ Build the container image using Google Cloud Build and deploy to Cloud Run:
 ```
 The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value-api-xxxx.a.run.app`).
 
+### Live Deployed Endpoints
+- **Cloud Run API**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app)
+- **Health Check**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health)
+- **Interactive OpenAPI Docs**: [https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs](https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs)
+
 ## Roadmap
 
 - [x] Data sourcing, cleaning and dated snapshots (TCGCSV)
@@ -349,9 +354,9 @@ The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value
 - [x] GCS setup script and public snapshot hosting
 - [x] FastAPI `/predict` and `/search` endpoints
 - [x] Dockerfile with ingest, train, serve, test and MLflow UI entry points
-- [x] Google Cloud Run deployment script
+- [x] Google Cloud Run live deployment
 - [x] Streamlit front-end application (`frontend/app.py`)
-- [ ] Live deployed URLs added to README (after GCP & Streamlit Cloud creation)
+- [ ] Streamlit Community Cloud public link
 
 ## Limitations and ethics
 

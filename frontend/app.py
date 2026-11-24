@@ -19,7 +19,7 @@ st.set_page_config(
 # Configuration & API Helpers
 # -----------------------------------------------------------------------------
 
-DEFAULT_API_URL = os.environ.get("API_URL", "http://127.0.0.1:8080")
+DEFAULT_API_URL = os.environ.get("API_URL", "https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app")
 
 with st.sidebar:
     st.image(
