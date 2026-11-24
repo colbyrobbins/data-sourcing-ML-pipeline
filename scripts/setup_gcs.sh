@@ -28,18 +28,21 @@ echo "==> Ensuring required Python dependencies are present..."
 python3 -c "import pandas, google.cloud.storage, pyarrow, yaml, requests" 2>/dev/null || pip install pandas pyarrow pyyaml requests google-cloud-storage
 
 echo "==> Updating config.yaml with GCS bucket..."
-python -c "
-import yaml
-with open('config.yaml') as f:
-    cfg = yaml.safe_load(f)
-cfg['storage']['backend'] = 'gcs'
-cfg['storage']['gcs_bucket'] = '$BUCKET_NAME'
-with open('config.yaml', 'w') as f:
-    yaml.safe_dump(cfg, f, sort_keys=False)
-print('Updated config.yaml: storage.backend=gcs, storage.gcs_bucket=$BUCKET_NAME')
-"
+# Edit the two lines in place so the comments in config.yaml survive.
+BUCKET_NAME="$BUCKET_NAME" python3 - <<'PY'
+import os, re
+from pathlib import Path
+path = Path("config.yaml")
+text = path.read_text()
+text = re.sub(r"(?m)^(  backend:)\s*[^#\s]*", r"\1 gcs", text, count=1)
+text = re.sub(r'(?m)^(  gcs_bucket:)\s*[^#\s]*', lambda m: f'{m.group(1)} "{os.environ["BUCKET_NAME"]}"', text, count=1)
+path.write_text(text)
+print(f"Updated config.yaml: storage.backend=gcs, storage.gcs_bucket={os.environ['BUCKET_NAME']}")
+PY
 
 echo "==> Ingesting and uploading snapshot to gs://$BUCKET_NAME/snapshots/..."
 python -m pipeline.ingest --upload
 
-echo "==> Done! GCS Bucket is ready and snapshot is uploaded."
+echo "==> Done! The bucket is ready and today's snapshot is uploaded."
+echo "    To train on it, copy the date and SHA-256 printed above into data.snapshot_date"
+echo "    and data.snapshot_sha256 in config.yaml."

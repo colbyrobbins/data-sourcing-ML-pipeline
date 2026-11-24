@@ -39,7 +39,8 @@ ENV GIT_COMMIT=${GIT_COMMIT}
 # Code, plus the trained model and search index if they exist (see .dockerignore).
 COPY . .
 
-# Train model and build search index if not already present in the build context
+# No trained model in the build context (e.g. `gcloud builds submit`, which skips git-ignored
+# files): train and build the search index here. Downloads the snapshot from GCS, ~5 min.
 RUN if [ ! -f "artifacts/model.joblib" ]; then \
       python -m pipeline.train && python -m pipeline.search build; \
     fi

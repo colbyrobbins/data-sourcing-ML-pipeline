@@ -21,6 +21,13 @@ st.set_page_config(
 
 DEFAULT_API_URL = os.environ.get("API_URL", "https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app")
 
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_health(base_url: str):
+    # Cloud Run can take ~10 s to cold-start, so allow more than a warm request needs.
+    resp = requests.get(f"{base_url}/health", timeout=20)
+    return resp.status_code, resp.json() if resp.status_code == 200 else {}
+
 with st.sidebar:
     st.image(
         "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png",
@@ -39,10 +46,10 @@ with st.sidebar:
     api_healthy = False
     health_data = {}
     try:
-        resp = requests.get(f"{api_url}/health", timeout=4)
-        if resp.status_code == 200:
+        status_code, health_json = fetch_health(api_url)
+        if status_code == 200:
             api_healthy = True
-            health_data = resp.json()
+            health_data = health_json
             st.success(f"🟢 **Connected** ({health_data.get('model_name', 'Model')})")
             st.caption(f"Snapshot: `{health_data.get('snapshot_date', 'N/A')}`")
             if health_data.get("search_enabled"):
@@ -50,7 +57,7 @@ with st.sidebar:
             else:
                 st.caption("ℹ️ Semantic search: **Disabled** (Prediction only)")
         else:
-            st.warning(f"⚠️ API returned HTTP {resp.status_code}")
+            st.warning(f"⚠️ API returned HTTP {status_code}")
     except Exception as exc:
         st.error("🔴 **API Disconnected**")
         st.caption(f"Cannot reach `{api_url}`. Make sure your API service is running.")
@@ -59,7 +66,7 @@ with st.sidebar:
     st.markdown(
         """
         **About this project**:
-        - **Pipeline**: TCGCSV snapshot → GCS Storage → Outlier-aware ML pipeline
+        - **Pipeline**: TCGCSV snapshot → Google Cloud Storage → scikit-learn + MLflow
         - **Deployment**: Google Cloud Run + Streamlit Cloud
         - **Team**: AIPI 510 Module Project 3
         """
@@ -95,9 +102,12 @@ with tab_search:
     with col_k:
         top_k = st.number_input("Max results", min_value=1, max_value=15, value=5)
 
-    search_btn = st.button("Search Cards", type="primary", use_container_width=True)
+    search_btn = st.button("Search Cards", type="primary", width="stretch")
 
-    if search_btn or query:
+    search_key = (query.strip(), int(top_k))
+    if query.strip() and (search_btn or st.session_state.get("last_search") != search_key):
+        st.session_state["last_search"] = search_key
+        st.session_state["search_results"] = []
         if not api_healthy:
             st.warning(
                 f"Please ensure the API backend is running at `{api_url}` to execute card searches."
@@ -108,7 +118,7 @@ with tab_search:
                     search_resp = requests.get(
                         f"{api_url}/search",
                         params={"q": query, "k": top_k},
-                        timeout=10,
+                        timeout=30,
                     )
                     if search_resp.status_code == 200:
                         results = search_resp.json().get("results", [])
@@ -144,7 +154,7 @@ with tab_search:
         with col_img:
             img_url = selected_card_data.get("image_url")
             if img_url:
-                st.image(img_url, use_container_width=True)
+                st.image(img_url, width="stretch")
             else:
                 st.caption("No image preview available")
 
@@ -187,7 +197,7 @@ with tab_search:
                         pred_resp = requests.post(
                             f"{api_url}/predict",
                             json=predict_payload,
-                            timeout=6,
+                            timeout=30,
                         )
                     if pred_resp.status_code == 200:
                         pred_data = pred_resp.json()
@@ -226,6 +236,25 @@ with tab_search:
 # -----------------------------------------------------------------------------
 # Tab 2: Manual Card Estimator
 # -----------------------------------------------------------------------------
+RARITIES = [
+    "Common", "Uncommon", "Rare", "Holo Rare", "Double Rare", "Ultra Rare",
+    "Illustration Rare", "Special Illustration Rare", "Hyper Rare", "Secret Rare",
+    "Shiny Holo Rare", "Shiny Rare", "Rainbow Rare", "ACE SPEC Rare", "Radiant Rare",
+    "Amazing Rare", "Classic Collection", "Promo",
+]
+PRINTINGS = [
+    "Normal", "Holofoil", "Reverse Holofoil", "1st Edition", "1st Edition Holofoil",
+    "Unlimited", "Unlimited Holofoil",
+]
+CARD_TYPES = [
+    "Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal",
+    "Fairy", "Dragon", "Colorless", "Supporter", "Item", "Stadium", "Tool", "Basic Energy",
+    "Special Energy",
+]
+STAGES = ["Basic", "Stage 1", "Stage 2", "VMAX", "VSTAR", "Mega", "BREAK Evolution", "Level Up"]
+
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 with tab_manual:
     st.subheader("Manual Card Attribute Estimator")
     st.markdown(
@@ -236,37 +265,23 @@ with tab_manual:
         col1, col2 = st.columns(2)
 
         with col1:
-            m_name = st.text_input("Card Name *", value="Umbreon VMAX - 215/203")
-            m_rarity = st.selectbox(
-                "Rarity *",
-                [
-                    "Special Illustration Rare",
-                    "Secret Rare",
-                    "Ultra Rare",
-                    "Illustration Rare",
-                    "Rare Holo",
-                    "Rare",
-                    "Uncommon",
-                    "Common",
-                    "Promo",
-                ],
+            m_name = st.text_input(
+                "Card Name *",
+                value="Umbreon VMAX (Alternate Art Secret)",
+                help="Words like ex, VMAX, Full Art or Alternate Art in the name are model features.",
             )
-            m_printing = st.selectbox(
-                "Printing *",
-                ["Holofoil", "Normal", "Reverse Holofoil", "1st Edition", "1st Edition Holofoil"],
-            )
-            m_card_type = st.selectbox(
-                "Card Type",
-                ["Darkness", "Fire", "Water", "Lightning", "Psychic", "Grass", "Fighting", "Metal", "Dragon", "Colorless", "Trainer", "Energy"],
-            )
-            m_stage = st.selectbox("Stage", ["VMAX", "VSTAR", "Basic", "Stage 1", "Stage 2"])
+            # Values as they appear in the TCGplayer data the model was trained on.
+            m_rarity = st.selectbox("Rarity *", RARITIES, index=RARITIES.index("Secret Rare"))
+            m_printing = st.selectbox("Printing *", PRINTINGS, index=PRINTINGS.index("Holofoil"))
+            m_card_type = st.selectbox("Card Type", CARD_TYPES, index=CARD_TYPES.index("Darkness"))
+            m_stage = st.selectbox("Stage", STAGES, index=STAGES.index("VMAX"))
 
         with col2:
-            m_hp = st.number_input("HP", min_value=0.0, max_value=400.0, value=320.0, step=10.0)
+            m_hp = st.number_input("HP", min_value=0.0, max_value=400.0, value=310.0, step=10.0)
             m_retreat = st.number_input("Retreat Cost", min_value=0.0, max_value=5.0, value=2.0, step=1.0)
             m_number = st.text_input("Collector Number (e.g. 215/203)", value="215/203")
             m_published = st.text_input("Set Published Date (YYYY-MM-DD)", value="2021-08-27")
-            m_attack2 = st.checkbox("Card Has Attack 2", value=True)
+            m_attack2 = st.checkbox("Card Has Attack 2", value=False)
             m_asking = st.number_input("Asking Price ($) [Optional]", min_value=0.0, value=650.0, step=5.0)
 
         submit_manual = st.form_submit_button("Predict Fair Market Value", type="primary")
@@ -288,19 +303,19 @@ with tab_manual:
 
         try:
             with st.spinner("Scoring card attributes..."):
-                resp = requests.post(f"{api_url}/predict", json=manual_payload, timeout=6)
+                resp = requests.post(f"{api_url}/predict", json=manual_payload, timeout=30)
             if resp.status_code == 200:
                 res = resp.json()
-                st.success(f"### Estimated Fair Value: **${res['fair_value']:,.2f}**")
+                st.success(f"### Estimated Fair Value: **\\${res['fair_value']:,.2f}**")
                 if res.get("verdict"):
                     v = res["verdict"]
                     if v == "deal":
                         st.balloons()
-                        st.success(f"🎉 **DEAL!** Asking price (${m_asking:,.2f}) is a bargain compared to ${res['fair_value']:,.2f} fair value.")
+                        st.success(f"🎉 **DEAL!** Asking price (\\${m_asking:,.2f}) is a bargain compared to \\${res['fair_value']:,.2f} fair value.")
                     elif v == "overpriced":
-                        st.error(f"⚠️ **OVERPRICED!** Asking price (${m_asking:,.2f}) exceeds fair market value (${res['fair_value']:,.2f}).")
+                        st.error(f"⚠️ **OVERPRICED!** Asking price (\\${m_asking:,.2f}) exceeds fair market value (\\${res['fair_value']:,.2f}).")
                     else:
-                        st.info(f"⚖️ **FAIR!** Asking price (${m_asking:,.2f}) matches fair market expectations.")
+                        st.info(f"⚖️ **FAIR!** Asking price (\\${m_asking:,.2f}) matches fair market expectations.")
             else:
                 st.error(f"Prediction failed ({resp.status_code}): {resp.text}")
         except Exception as exc:
@@ -321,19 +336,22 @@ with tab_about:
            - SHA-256 pinned and hosted in **Google Cloud Storage (GCS)**.
            - GroupShuffleSplit by `product_id` guarantees that all printings of a card stay strictly in the same split.
 
-        2. **Two-Stage Outlier & Hurdle Architecture**:
-           - **Stage 1 (Chase Detector)**: Identifies whether a card is an extreme high-value collectible ($y \\ge \\$25$).
-           - **Stage 2 (Specialized Regressors)**: Separate estimators for bulk cards vs. chase cards, smoothly blended via predicted chase probability.
-           - Encapsulated directly into a scikit-learn pipeline for zero-overhead inference.
+        2. **Model Selection**:
+           - Four candidates are compared on the validation split: histogram gradient boosting,
+             random forest, ridge regression, and a two-stage "hurdle" model (a classifier for
+             cards worth \\$25 or more, plus separate regressors for cheap and expensive cards).
+           - Gradient boosting won (validation RMSE 0.621 on log price vs 0.644 for the hurdle
+             model), so it is the deployed model. Test-set R² on log price: 0.82.
+           - Feature engineering lives inside the scikit-learn pipeline, so the API passes raw card fields.
 
         3. **Cloud Deployment**:
-           - **Container**: Multi-stage Docker image packaging scikit-learn, PyTorch CPU, ChromaDB, and FastAPI.
+           - **Container**: one Docker image with scikit-learn, CPU-only PyTorch, ChromaDB and FastAPI.
            - **API Endpoint**: Hosted on **Google Cloud Run** with auto-scaling and public accessibility.
            - **Front-End**: Deployed on **Streamlit Community Cloud**.
 
         4. **Limitations & Ethical Considerations**:
            - The model estimates near-mint raw market value; physical grading (PSA/BGS/CGC) and condition are not captured.
-           - High-value chase cards often follow speculative hype cycles that attribute-based models cannot fully predict.
+           - High-value chase cards follow hype cycles that card attributes can't capture, so the model under-values them. Compare with the snapshot market price shown next to each search result.
            - Deal indicators should be viewed as algorithmic guidance, not financial advice.
         """
     )

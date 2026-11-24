@@ -12,7 +12,7 @@ data:
   snapshot_date: "2026-11-23"
   # SHA-256 of the cleaned snapshot file. Training refuses a file that doesn't
   # match. Leave empty to skip the check (e.g. right after making a new snapshot).
-  snapshot_sha256: ""
+  snapshot_sha256: "7935b3660b72261e152cf76ee957d4fac12889dc8c5218cd6a858efefc2b5ff9"
 
   raw_dir: data/raw             # raw TCGCSV JSON, one folder per snapshot date
   processed_dir: data/processed # cleaned snapshots (parquet)

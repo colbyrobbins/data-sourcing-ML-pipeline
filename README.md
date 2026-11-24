@@ -8,8 +8,8 @@ The model needs details like rarity and collector number, so the app starts with
 card search**. You type "charizard ex 151" or "fiery flying dragon", pick the card, and its
 details go straight to the model.
 
-> **Status:** the data, training and search pipeline, the API, and the Docker image are in
-> place. Cloud deployment and the front end are still to come (see [Roadmap](#roadmap)).
+> **Status:** the snapshot is in Google Cloud Storage, the API runs on Google Cloud Run, and a
+> Streamlit front end calls it (see [Cloud deployment](#cloud-deployment-gcp) and [Roadmap](#roadmap)).
 
 ## Problem
 
@@ -30,10 +30,10 @@ details go straight to the model.
 | | |
 |---|---|
 | Source | [TCGCSV](https://tcgcsv.com), a free nightly mirror of TCGplayer's catalog and prices (category 3 = Pokémon) |
-| Snapshot | `2026-11-22`: 222 sets, 45,807 product/printing rows |
-| After cleaning | **42,326** single cards with a market price |
+| Snapshot | `2026-11-23`, one day's prices |
+| After cleaning | **42,352** single cards (product × printing) with a market price, from 28,331 products in 213 sets |
 | Cleaning | drop sealed products (no rarity), code cards, unconfirmed rarities and rows without a price; parse HP, retreat cost and dates; strip HTML from attack and card text |
-| Storage | the cleaned snapshot is a single parquet file, uploaded to Google Cloud Storage (see [Cloud storage](#cloud-storage)) |
+| Storage | the cleaned snapshot is a single parquet file, uploaded to Google Cloud Storage (see [Cloud deployment](#cloud-deployment-gcp)) |
 
 TCGCSV prices change every day, so the pipeline never trains on live data. `pipeline.ingest`
 freezes a dated snapshot, and `config.yaml` pins its date and SHA-256 checksum. Training
@@ -68,8 +68,8 @@ TCGCSV API ──► ingest.py ──► cleaned snapshot (parquet) ──► GC
 | `pipeline/ingest.py` | Fetch every Pokémon set's products and prices, flatten and clean them, save a dated snapshot, and optionally upload it to GCS |
 | `pipeline/storage.py` | GCS upload/download. Reading falls back to anonymous access for public buckets |
 | `pipeline/data.py` | Load the configured snapshot (from GCS or a verified local copy), then split it into train/validation/test, keeping all printings of a card in the same split |
-| `pipeline/features.py` | `CardFeatures`: turn raw card fields into model features (set age, secret-rare numbering, name flags such as `ex`/`VMAX`/`Charizard`) |
-| `pipeline/model.py` | Candidate models (gradient boosting, random forest, ridge), each a full sklearn pipeline from raw fields to dollars |
+| `pipeline/features.py` | `CardFeatures`: turn raw card fields into model features (set age, vintage era, secret-rare numbering, name flags such as `ex`/`VMAX`/`Charizard`/eeveelutions) |
+| `pipeline/model.py` | Candidate models (gradient boosting, random forest, ridge, two-stage hurdle), each a full sklearn pipeline from raw fields to dollars |
 | `pipeline/train.py` | Run the pipeline and log everything to MLflow |
 | `pipeline/evaluate.py` | Metrics and diagnostic plots |
 | `pipeline/predict.py` | Load the model and predict fair values / deal verdicts. This is what the API calls |
@@ -78,23 +78,31 @@ TCGCSV API ──► ingest.py ──► cleaned snapshot (parquet) ──► GC
 
 Feature engineering lives inside the saved model, so the API only has to pass raw card fields.
 
-## Results (snapshot 2026-11-22)
+## Results (snapshot 2026-11-23)
 
-Validation scores for each candidate:
+Validation scores for each candidate (6,416 cards):
 
 | Model | RMSE (log) | R² (log) | Notes |
 |---|---|---|---|
-| **Two-Stage Hurdle Outlier** | **0.628** | **0.817** | **Classifier gate + specialized bulk/chase regressors with soft blending** |
-| Histogram gradient boosting | 0.645 | 0.806 | Baseline tree regressor |
-| Random forest | 0.661 | 0.796 | Baseline forest |
-| Ridge regression | 0.937 | 0.590 | Baseline linear model |
+| **Histogram gradient boosting** | **0.621** | **0.827** | **Selected** |
+| Random forest | 0.638 | 0.818 | |
+| Two-stage hurdle | 0.644 | 0.814 | Classifier gate for cards ≥ $25, plus separate bulk and chase regressors blended by the gate's probability |
+| Ridge regression | 0.920 | 0.621 | |
 
 The best model, refit on train + validation and scored once on the held-out test set
-(6,358 cards):
+(6,309 cards):
 
 | RMSE (log) | R² (log) | Median abs. error | Median abs. % error | Mean abs. error |
 |---|---|---|---|---|
-| 0.657 | 0.799 | $0.75 | 52% | $13.59 |
+| 0.627 | 0.820 | $0.73 | 49% | $12.71 |
+
+**The hurdle model didn't help.** We added it to fix the under-valuation of expensive chase
+cards, but it scored worse on validation than a single gradient-boosting model, so the
+pipeline kept gradient boosting. The cut at $25 leaves the chase regressor few examples, and
+a wrong gate decision costs more than the blend saves. What did help was the new features
+(vintage era, eeveelution and chase-legendary name flags): test RMSE went from 0.657 to 0.627
+compared with the previous version. The two runs use different daily snapshots, so that
+comparison is approximate.
 
 The typical card is cheap, so the median error is under a dollar. The mean error is pulled up
 by a few very expensive cards that the attributes can't explain, such as vintage 1st editions
@@ -124,7 +132,7 @@ Training reads the snapshot pinned in `config.yaml`.
 ```bash
 python -m pipeline.ingest                  # fetch today's prices (~2 min), clean, save to data/processed/
 python -m pipeline.ingest --upload         # ...and upload to gs://<bucket>/snapshots/
-python -m pipeline.ingest --skip-fetch --date 2026-11-22   # rebuild from raw files already downloaded
+python -m pipeline.ingest --skip-fetch --date 2026-11-23   # rebuild from raw files already downloaded
 ```
 
 The command prints the snapshot's date and SHA-256. Copy them into `data.snapshot_date` and
@@ -168,14 +176,14 @@ A price more than 15% below fair value is a deal, and more than 15% above is ove
 ### 5. Search for a card
 
 ```bash
-python -m pipeline.search build                           # embed all 28,310 cards (~75 s, downloads the model once)
+python -m pipeline.search build                           # embed all 28,331 cards (~75 s, downloads the model once)
 python -m pipeline.search query "charizard ex 151"
 ```
 
 ```
-1.142  Charizard ex - 199/165  [SV: Scarlet & Violet 151, Special Illustration Rare]  Holofoil $279.37
-1.120  Charizard ex - 183/165  [SV: Scarlet & Violet 151, Ultra Rare]  Holofoil $31.00
-1.106  Charizard ex - 006/165  [SV: Scarlet & Violet 151, Double Rare]  Holofoil $7.24
+1.142  Charizard ex - 199/165  [SV: Scarlet & Violet 151, Special Illustration Rare]  Holofoil $277.65
+1.120  Charizard ex - 183/165  [SV: Scarlet & Violet 151, Ultra Rare]  Holofoil $30.57
+1.106  Charizard ex - 006/165  [SV: Scarlet & Violet 151, Double Rare]  Holofoil $7.57
 ```
 
 **How search works:** this builds on Colby's
@@ -241,7 +249,7 @@ curl -s -X POST http://127.0.0.1:8080/predict -H "Content-Type: application/json
 ```
 
 ```json
-{"fair_value": 288.81, "asking_price": 120.0, "verdict": "deal", "model_name": "hist_gbm", "snapshot_date": "2026-11-22"}
+{"fair_value": 217.78, "asking_price": 120.0, "verdict": "deal", "model_name": "hist_gbm", "snapshot_date": "2026-11-23"}
 ```
 
 **Settings (environment variables)**
@@ -257,15 +265,15 @@ A web interface is included in `frontend/app.py` for end users to search cards, 
 ```bash
 streamlit run frontend/app.py
 ```
-By default, the front end connects to `http://127.0.0.1:8080`. You can paste your live Google Cloud Run URL directly into the sidebar setting.
+By default, the front end calls the live Cloud Run API. To use a local server instead, set
+`API_URL=http://127.0.0.1:8080` or paste the URL into the sidebar.
 
 ### Deploy to Streamlit Community Cloud:
-1. Push your repository to GitHub.
-2. Sign in to [share.streamlit.io](https://share.streamlit.io).
-3. Click **New app**, select this repository and branch.
-4. Set Main file path to: `frontend/app.py`.
-5. Under **Advanced settings**, set environment variable `API_URL` to your deployed Cloud Run URL.
-6. Deploy! Your app is now live and publicly accessible.
+1. Sign in to [share.streamlit.io](https://share.streamlit.io).
+2. Click **New app** and pick this repository, the `main` branch, and `frontend/app.py` as the
+   main file. Streamlit installs `frontend/requirements.txt`, not the heavy root one.
+3. Optional: to point at a different API, add `API_URL = "https://..."` under
+   **Advanced settings → Secrets**. Top-level secrets are exposed as environment variables.
 
 ## Docker
 
@@ -293,7 +301,12 @@ docker run --rm -v "$PWD/data:/app/data" -v "$PWD/artifacts:/app/artifacts" -v "
 **3. Rebuild and serve**
 
 The image includes `artifacts/` when it exists, so rebuild after training and the server
-needs no mounts. That's also how the image is deployed.
+needs no mounts.
+
+If the build context has no `artifacts/model.joblib`, the build trains the model and builds
+the search index itself. This happens with `gcloud builds submit`, which skips git-ignored
+files. That build step downloads the snapshot from the GCS bucket, so it needs network access
+and adds about 5 minutes.
 
 ```bash
 docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t pokemon-fair-value . && docker run --rm -p 8080:8080 pokemon-fair-value
@@ -350,7 +363,7 @@ The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value
 - [x] `config.yaml`-driven, reproducible training with a train/validation/test split
 - [x] MLflow experiment tracking
 - [x] Semantic card search index (ChromaDB + sentence-transformers, hybrid ranking)
-- [x] Two-Stage Hurdle Outlier model for high-value card pricing
+- [x] Two-stage hurdle model for high-value cards (evaluated; lost to gradient boosting)
 - [x] GCS setup script and public snapshot hosting
 - [x] FastAPI `/predict` and `/search` endpoints
 - [x] Dockerfile with ingest, train, serve, test and MLflow UI entry points
@@ -362,9 +375,11 @@ The script outputs the live Cloud Run endpoint (e.g. `https://pokemon-fair-value
 
 - **Unpriced factors:** the model doesn't know a Pokémon's popularity beyond name flags,
   a card's condition or physical grading (PSA/CGC), or recent tournament hype.
-- **Outlier dynamics:** extreme high-value chase cards are governed by collector sentiment
-  that is partly uncoupled from game mechanics. The two-stage hurdle model isolates these
-  cards to mitigate distortion.
+- **Expensive cards:** chase-card prices follow collector sentiment more than anything printed
+  on the card, so the model still under-values them. The Umbreon VMAX Alt Art from Evolving
+  Skies sells for $2,149, and the model estimates $233. A separate model for expensive cards
+  (the two-stage hurdle) didn't fix this. The front end shows the snapshot market price next to
+  the estimate for this reason.
 - **Snapshot in time:** market prices move, and a model trained on one day's prices goes
   stale. Re-ingest and retrain regularly.
 - **Who benefits:** a "deal finder" mostly helps resellers buy underpriced cards. That can
