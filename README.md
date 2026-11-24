@@ -11,6 +11,18 @@ details go straight to the model.
 > **Status:** the snapshot is in Google Cloud Storage, the API runs on Google Cloud Run, and a
 > Streamlit front end calls it (see [Cloud deployment](#cloud-deployment-gcp) and [Roadmap](#roadmap)).
 
+## Links
+
+| | |
+|---|---|
+| **Front end (Streamlit)** | _Not deployed yet. Run it locally with `streamlit run frontend/app.py` (see [Front end](#front-end-application-streamlit))_ |
+| **API (Cloud Run)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app |
+| **API docs (Swagger)** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/docs |
+| **Health check** | https://pokemon-fair-value-api-3tplqbtcoa-uc.a.run.app/health |
+| **Snapshot (GCS)** | `gs://data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet` ([download](https://storage.googleapis.com/data-sourcing-ml-pipeline-data/snapshots/cards_2026-11-23.parquet)) |
+| **Data source** | [TCGCSV](https://tcgcsv.com) (TCGplayer prices, Pokémon = category 3) |
+| **Search activity this builds on** | [colbyrobbins/Semantic-Search-Engine](https://github.com/colbyrobbins/Semantic-Search-Engine) |
+
 ## Problem
 
 - **Task:** supervised regression.
